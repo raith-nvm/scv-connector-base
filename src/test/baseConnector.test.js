@@ -61,10 +61,8 @@ const dummySupervisorConnectedPhoneCall = new PhoneCall({ callId: dummyCallId, c
 const dummySupervisorBargedInPhoneCall = new PhoneCall({ callId: dummyCallId, callType: constants.CALL_TYPE.INBOUND, callSubtype: constants.CALL_SUBTYPE.PSTN, contact: dummyContact, state: constants.CALL_STATE.CONNECTED, callAttributes: { initialCallHasEnded: false, participantType: constants.PARTICIPANT_TYPE.SUPERVISOR, hasSupervisorBargedIn: true }, phoneNumber: '100'});
 const thirdPartyRemovedResult = new CallResult({ call: new PhoneCall({ callId: dummyCallId, callType: constants.CALL_TYPE.ADD_PARTICIPANT, callSubtype: constants.CALL_SUBTYPE.PSTN, reason: dummyReason, state: 'state', callAttributes: { participantType: constants.PARTICIPANT_TYPE.THIRD_PARTY }, phoneNumber: '100'}) });
 const initialCallerRemovedResult = new CallResult({ call: new PhoneCall({ callId: dummyCallId, callType: constants.CALL_TYPE.ADD_PARTICIPANT, callSubtype: constants.CALL_SUBTYPE.PSTN, reason: dummyReason, state: 'state', callAttributes: { participantType: constants.PARTICIPANT_TYPE.INITIAL_CALLER }, phoneNumber: '100'}) });
-const dummyTransferringCall = new PhoneCall({ callId: 'callId', callType: constants.CALL_TYPE.ADD_PARTICIPANT, callSubtype: constants.CALL_SUBTYPE.PSTN, contact: dummyContact, state: constants.CALL_STATE.TRANSFERRING, callAttributes: { initialCallHasEnded: false }, phoneNumber: '100'});
 const dummyTransferredCall = new PhoneCall({ callId: 'dummyCallId', callType: constants.CALL_TYPE.ADD_PARTICIPANT, callSubtype: constants.CALL_SUBTYPE.PSTN, contact: dummyContact, state: constants.CALL_STATE.TRANSFERRED, callAttributes: { initialCallHasEnded: false }, phoneNumber: '100'});
 const dummyConsultCall = new PhoneCall({ callId: dummyConsultCallId, callType: constants.CALL_TYPE.CONSULT, callSubtype: constants.CALL_SUBTYPE.PSTN, contact: dummyContact, state: constants.CALL_STATE.TRANSFERRED, callAttributes: { initialCallHasEnded: false }, phoneNumber: '101'});
-const dummyActiveTransferringCallResult = new ActiveCallsResult({ activeCalls: [dummyTransferringCall] });
 const dummyTransferringPhoneCall = new PhoneCall({ callId: dummyCallId, callType: constants.CALL_TYPE.INBOUND, callSubtype: constants.CALL_SUBTYPE.PSTN, contact: dummyContact, state: constants.CALL_STATE.TRANSFERRING, callAttributes: { initialCallHasEnded: false }, phoneNumber: '100'});
 const dummyTransferredPhoneCall = new PhoneCall({ callId: dummyCallId, callType: constants.CALL_TYPE.INBOUND, callSubtype: constants.CALL_SUBTYPE.PSTN, contact: dummyContact, state: constants.CALL_STATE.TRANSFERRED, callAttributes: { initialCallHasEnded: false, isAutoMergeOn: true }, phoneNumber: '100'});
 const dummyReason = 'dummyReason';
@@ -97,6 +95,7 @@ const callResult = new CallResult({ call: dummyPhoneCall });
 const callbackResult = new CallResult({ call: dummyCallback });
 const dialedCallbackResult = new CallResult( { call: dummyDialedCallback});
 const callHangUpResult = new HangupResult({ calls: [new PhoneCall({ reason: dummyReason, callId: dummyCallId, closeCallOnError: dummyCloseCallOnError, callType: dummyCallType, callSubtype: dummyCallSubtype, agentStatus: dummyAgentStatus, isOmniSoftphone: dummyIsOmniSoftphone })]});
+const consultCallHangUpResult = new HangupResult({ calls: [new PhoneCall({ reason: dummyReason, callId: dummyCallId, closeCallOnError: dummyCloseCallOnError, callType: constants.CALL_TYPE.CONSULT, callSubtype: dummyCallSubtype, agentStatus: dummyAgentStatus, isOmniSoftphone: dummyIsOmniSoftphone })]});
 const muteToggleResult = new MuteToggleResult({ isMuted: true });
 const unmuteToggleResult = new MuteToggleResult({ isMuted: false });
 const signedRecordingUrlResult = new SignedRecordingUrlResult({ success: true, url: 'recordingUrl', duration: 10, callId: 'callId' });
@@ -1032,6 +1031,20 @@ describe('SCVConnectorBase tests', () => {
                     isError: false
                 });
             });
+            it('Should dispatch HANGUP on a successful endCall() invocation for a Consult Call with non empty active calls', async () => {
+                telephonyAdapter.endCall = jest.fn().mockResolvedValue(consultCallHangUpResult);
+                telephonyAdapter.getActiveCalls = jest.fn().mockResolvedValue(activeCallsResult);
+                fireMessage(constants.VOICE_MESSAGE_TYPE.END_CALL);
+                await expect(adapter.getTelephonyConnector()).resolves.toBe(telephonyAdapter);
+                await expect(telephonyAdapter.endCall()).resolves.toEqual(consultCallHangUpResult);
+                await expect(telephonyAdapter.getActiveCalls()).resolves.toEqual(activeCallsResult);
+                assertChannelPortPayload({ eventType: constants.VOICE_EVENT_TYPE.HANGUP, payload: consultCallHangUpResult.calls[0] });
+                assertChannelPortPayloadEventLog({
+                    eventType: constants.VOICE_EVENT_TYPE.HANGUP,
+                    payload: consultCallHangUpResult.calls[0],
+                    isError: false
+                });
+            });
         });
 
         describe('mute()', () => {
@@ -1554,6 +1567,206 @@ describe('SCVConnectorBase tests', () => {
                 });
             });
 
+            it('Should dispatch PHONE_NUMBER_NOT_VALID error when dial() fails with invalid phone number', async () => {
+                const errorResult = new ErrorResult({ type: Constants.VOICE_ERROR_TYPE.PHONE_NUMBER_NOT_VALID });
+                telephonyAdapter.dial = jest.fn().mockRejectedValue(errorResult);
+                fireMessage(constants.VOICE_MESSAGE_TYPE.DIAL, { contact: dummyContact });
+                await expect(adapter.getTelephonyConnector()).resolves.toBe(telephonyAdapter);
+                await expect(telephonyAdapter.dial()).rejects.toBe(errorResult);
+                assertChannelPortPayload({ eventType: constants.VOICE_EVENT_TYPE.CALL_FAILED });
+                assertChannelPortPayload({ eventType: constants.SHARED_EVENT_TYPE.ERROR, payload: {
+                        message: constants.VOICE_ERROR_TYPE.PHONE_NUMBER_NOT_VALID
+                    }});
+                assertChannelPortPayloadEventLog({
+                    eventType: constants.VOICE_MESSAGE_TYPE.DIAL,
+                    payload: {
+                        errorType: constants.VOICE_ERROR_TYPE.PHONE_NUMBER_NOT_VALID,
+                        error: expect.anything()
+                    },
+                    isError: true
+                });
+            });
+
+            it('Should dispatch AREA_CODE_NOT_IN_DIALABLE_LIST error when dial() fails with restricted area code', async () => {
+                const errorResult = new ErrorResult({ type: Constants.VOICE_ERROR_TYPE.AREA_CODE_NOT_IN_DIALABLE_LIST });
+                telephonyAdapter.dial = jest.fn().mockRejectedValue(errorResult);
+                fireMessage(constants.VOICE_MESSAGE_TYPE.DIAL, { contact: dummyContact });
+                await expect(adapter.getTelephonyConnector()).resolves.toBe(telephonyAdapter);
+                await expect(telephonyAdapter.dial()).rejects.toBe(errorResult);
+                assertChannelPortPayload({ eventType: constants.VOICE_EVENT_TYPE.CALL_FAILED });
+                assertChannelPortPayload({ eventType: constants.SHARED_EVENT_TYPE.ERROR, payload: {
+                        message: constants.VOICE_ERROR_TYPE.AREA_CODE_NOT_IN_DIALABLE_LIST
+                    }});
+                assertChannelPortPayloadEventLog({
+                    eventType: constants.VOICE_MESSAGE_TYPE.DIAL,
+                    payload: {
+                        errorType: constants.VOICE_ERROR_TYPE.AREA_CODE_NOT_IN_DIALABLE_LIST,
+                        error: expect.anything()
+                    },
+                    isError: true
+                });
+            });
+
+            it('Should dispatch PHONE_NUMBER_NOT_VALID_E164_FORMAT error when dial() fails with invalid E164 format', async () => {
+                const errorResult = new ErrorResult({ type: Constants.VOICE_ERROR_TYPE.PHONE_NUMBER_NOT_VALID_E164_FORMAT });
+                telephonyAdapter.dial = jest.fn().mockRejectedValue(errorResult);
+                fireMessage(constants.VOICE_MESSAGE_TYPE.DIAL, { contact: dummyContact });
+                await expect(adapter.getTelephonyConnector()).resolves.toBe(telephonyAdapter);
+                await expect(telephonyAdapter.dial()).rejects.toBe(errorResult);
+                assertChannelPortPayload({ eventType: constants.VOICE_EVENT_TYPE.CALL_FAILED });
+                assertChannelPortPayload({ eventType: constants.SHARED_EVENT_TYPE.ERROR, payload: {
+                        message: constants.VOICE_ERROR_TYPE.PHONE_NUMBER_NOT_VALID_E164_FORMAT
+                    }});
+                assertChannelPortPayloadEventLog({
+                    eventType: constants.VOICE_MESSAGE_TYPE.DIAL,
+                    payload: {
+                        errorType: constants.VOICE_ERROR_TYPE.PHONE_NUMBER_NOT_VALID_E164_FORMAT,
+                        error: expect.anything()
+                    },
+                    isError: true
+                });
+            });
+
+            it('Should dispatch UNAUTHORIZED_SERVICE_CALL error when dial() fails with unauthorized service call', async () => {
+                const errorResult = new ErrorResult({ type: Constants.VOICE_ERROR_TYPE.UNAUTHORIZED_SERVICE_CALL });
+                telephonyAdapter.dial = jest.fn().mockRejectedValue(errorResult);
+                fireMessage(constants.VOICE_MESSAGE_TYPE.DIAL, { contact: dummyContact });
+                await expect(adapter.getTelephonyConnector()).resolves.toBe(telephonyAdapter);
+                await expect(telephonyAdapter.dial()).rejects.toBe(errorResult);
+                assertChannelPortPayload({ eventType: constants.VOICE_EVENT_TYPE.CALL_FAILED });
+                assertChannelPortPayload({ eventType: constants.SHARED_EVENT_TYPE.ERROR, payload: {
+                        message: constants.VOICE_ERROR_TYPE.UNAUTHORIZED_SERVICE_CALL
+                    }});
+                assertChannelPortPayloadEventLog({
+                    eventType: constants.VOICE_MESSAGE_TYPE.DIAL,
+                    payload: {
+                        errorType: constants.VOICE_ERROR_TYPE.UNAUTHORIZED_SERVICE_CALL,
+                        error: expect.anything()
+                    },
+                    isError: true
+                });
+            });
+
+            it('Should dispatch AGENT_AT_MAXIMUM_CAPACITY error when dial() fails with agent at maximum capacity', async () => {
+                const errorResult = new ErrorResult({ type: Constants.VOICE_ERROR_TYPE.AGENT_AT_MAXIMUM_CAPACITY });
+                telephonyAdapter.dial = jest.fn().mockRejectedValue(errorResult);
+                fireMessage(constants.VOICE_MESSAGE_TYPE.DIAL, { contact: dummyContact });
+                await expect(adapter.getTelephonyConnector()).resolves.toBe(telephonyAdapter);
+                await expect(telephonyAdapter.dial()).rejects.toBe(errorResult);
+                assertChannelPortPayload({ eventType: constants.VOICE_EVENT_TYPE.CALL_FAILED });
+                assertChannelPortPayload({ eventType: constants.SHARED_EVENT_TYPE.ERROR, payload: {
+                        message: constants.VOICE_ERROR_TYPE.AGENT_AT_MAXIMUM_CAPACITY
+                    }});
+                assertChannelPortPayloadEventLog({
+                    eventType: constants.VOICE_MESSAGE_TYPE.DIAL,
+                    payload: {
+                        errorType: constants.VOICE_ERROR_TYPE.AGENT_AT_MAXIMUM_CAPACITY,
+                        error: expect.anything()
+                    },
+                    isError: true
+                });
+            });
+
+            it('Should dispatch OUTBOUND_QUEUE_MISCONFIGURED error when dial() fails with misconfigured queue', async () => {
+                const errorResult = new ErrorResult({ type: Constants.VOICE_ERROR_TYPE.OUTBOUND_QUEUE_MISCONFIGURED });
+                telephonyAdapter.dial = jest.fn().mockRejectedValue(errorResult);
+                fireMessage(constants.VOICE_MESSAGE_TYPE.DIAL, { contact: dummyContact });
+                await expect(adapter.getTelephonyConnector()).resolves.toBe(telephonyAdapter);
+                await expect(telephonyAdapter.dial()).rejects.toBe(errorResult);
+                assertChannelPortPayload({ eventType: constants.VOICE_EVENT_TYPE.CALL_FAILED });
+                assertChannelPortPayload({ eventType: constants.SHARED_EVENT_TYPE.ERROR, payload: {
+                        message: constants.VOICE_ERROR_TYPE.OUTBOUND_QUEUE_MISCONFIGURED
+                    }});
+                assertChannelPortPayloadEventLog({
+                    eventType: constants.VOICE_MESSAGE_TYPE.DIAL,
+                    payload: {
+                        errorType: constants.VOICE_ERROR_TYPE.OUTBOUND_QUEUE_MISCONFIGURED,
+                        error: expect.anything()
+                    },
+                    isError: true
+                });
+            });
+
+            it('Should dispatch CALL_THROTTLED error when dial() fails with call throttled', async () => {
+                const errorResult = new ErrorResult({ type: Constants.VOICE_ERROR_TYPE.CALL_THROTTLED });
+                telephonyAdapter.dial = jest.fn().mockRejectedValue(errorResult);
+                fireMessage(constants.VOICE_MESSAGE_TYPE.DIAL, { contact: dummyContact });
+                await expect(adapter.getTelephonyConnector()).resolves.toBe(telephonyAdapter);
+                await expect(telephonyAdapter.dial()).rejects.toBe(errorResult);
+                assertChannelPortPayload({ eventType: constants.VOICE_EVENT_TYPE.CALL_FAILED });
+                assertChannelPortPayload({ eventType: constants.SHARED_EVENT_TYPE.ERROR, payload: {
+                        message: constants.VOICE_ERROR_TYPE.CALL_THROTTLED
+                    }});
+                assertChannelPortPayloadEventLog({
+                    eventType: constants.VOICE_MESSAGE_TYPE.DIAL,
+                    payload: {
+                        errorType: constants.VOICE_ERROR_TYPE.CALL_THROTTLED,
+                        error: expect.anything()
+                    },
+                    isError: true
+                });
+            });
+
+            it('Should dispatch TIMEOUT_ERROR error when dial() fails with timeout', async () => {
+                const errorResult = new ErrorResult({ type: Constants.VOICE_ERROR_TYPE.TIMEOUT_ERROR });
+                telephonyAdapter.dial = jest.fn().mockRejectedValue(errorResult);
+                fireMessage(constants.VOICE_MESSAGE_TYPE.DIAL, { contact: dummyContact });
+                await expect(adapter.getTelephonyConnector()).resolves.toBe(telephonyAdapter);
+                await expect(telephonyAdapter.dial()).rejects.toBe(errorResult);
+                assertChannelPortPayload({ eventType: constants.VOICE_EVENT_TYPE.CALL_FAILED });
+                assertChannelPortPayload({ eventType: constants.SHARED_EVENT_TYPE.ERROR, payload: {
+                        message: constants.VOICE_ERROR_TYPE.TIMEOUT_ERROR
+                    }});
+                assertChannelPortPayloadEventLog({
+                    eventType: constants.VOICE_MESSAGE_TYPE.DIAL,
+                    payload: {
+                        errorType: constants.VOICE_ERROR_TYPE.TIMEOUT_ERROR,
+                        error: expect.anything()
+                    },
+                    isError: true
+                });
+            });
+
+            it('Should dispatch UNABLE_TO_CONNECT_TO_AGENT error when dial() fails to connect to agent', async () => {
+                const errorResult = new ErrorResult({ type: Constants.VOICE_ERROR_TYPE.UNABLE_TO_CONNECT_TO_AGENT });
+                telephonyAdapter.dial = jest.fn().mockRejectedValue(errorResult);
+                fireMessage(constants.VOICE_MESSAGE_TYPE.DIAL, { contact: dummyContact });
+                await expect(adapter.getTelephonyConnector()).resolves.toBe(telephonyAdapter);
+                await expect(telephonyAdapter.dial()).rejects.toBe(errorResult);
+                assertChannelPortPayload({ eventType: constants.VOICE_EVENT_TYPE.CALL_FAILED });
+                assertChannelPortPayload({ eventType: constants.SHARED_EVENT_TYPE.ERROR, payload: {
+                        message: constants.VOICE_ERROR_TYPE.UNABLE_TO_CONNECT_TO_AGENT
+                    }});
+                assertChannelPortPayloadEventLog({
+                    eventType: constants.VOICE_MESSAGE_TYPE.DIAL,
+                    payload: {
+                        errorType: constants.VOICE_ERROR_TYPE.UNABLE_TO_CONNECT_TO_AGENT,
+                        error: expect.anything()
+                    },
+                    isError: true
+                });
+            });
+
+            it('Should dispatch AGENT_NOT_INITIALIZED error when dial() fails with agent not initialized', async () => {
+                const errorResult = new ErrorResult({ type: Constants.VOICE_ERROR_TYPE.AGENT_NOT_INITIALIZED });
+                telephonyAdapter.dial = jest.fn().mockRejectedValue(errorResult);
+                fireMessage(constants.VOICE_MESSAGE_TYPE.DIAL, { contact: dummyContact });
+                await expect(adapter.getTelephonyConnector()).resolves.toBe(telephonyAdapter);
+                await expect(telephonyAdapter.dial()).rejects.toBe(errorResult);
+                assertChannelPortPayload({ eventType: constants.VOICE_EVENT_TYPE.CALL_FAILED });
+                assertChannelPortPayload({ eventType: constants.SHARED_EVENT_TYPE.ERROR, payload: {
+                        message: constants.VOICE_ERROR_TYPE.AGENT_NOT_INITIALIZED
+                    }});
+                assertChannelPortPayloadEventLog({
+                    eventType: constants.VOICE_MESSAGE_TYPE.DIAL,
+                    payload: {
+                        errorType: constants.VOICE_ERROR_TYPE.AGENT_NOT_INITIALIZED,
+                        error: expect.anything()
+                    },
+                    isError: true
+                });
+            });
+            
             it('Should dispatch CALL_STARTED on a successful dial() invocation', async () => {
                 telephonyAdapter.dial = jest.fn().mockResolvedValue(callResult);
                 fireMessage(constants.VOICE_MESSAGE_TYPE.DIAL, { contact: dummyContact });
@@ -1796,6 +2009,7 @@ describe('SCVConnectorBase tests', () => {
             });
 
             it('Should dispatch HOLD_TOGGLE on a successful conference() invocation', async () => {
+                holdToggleResult.isCallMerged = true;
                 telephonyAdapter.conference = jest.fn().mockResolvedValue(holdToggleResult);
                 fireMessage(constants.VOICE_MESSAGE_TYPE.CONFERENCE);
                 await expect(adapter.getTelephonyConnector()).resolves.toBe(telephonyAdapter);
@@ -1803,7 +2017,8 @@ describe('SCVConnectorBase tests', () => {
                 const payload = {
                     isThirdPartyOnHold: holdToggleResult.isThirdPartyOnHold,
                     isCustomerOnHold: holdToggleResult.isCustomerOnHold,
-                    calls: calls
+                    calls: calls,
+                    isCallMerged: true
                 };
                 assertChannelPortPayload({ eventType: constants.VOICE_EVENT_TYPE.HOLD_TOGGLE, payload });
                 assertChannelPortPayloadEventLog({
@@ -2819,38 +3034,6 @@ describe('SCVConnectorBase tests', () => {
                     isError: false
                 });
             });
-
-            it('Should dispatch PARTICIPANT_ADDED with removing initial caller and transferring active calls', async () => {
-                telephonyAdapter.getActiveCalls = jest.fn().mockResolvedValue(dummyActiveTransferringCallResult);
-                publishEvent({ eventType: Constants.VOICE_EVENT_TYPE.PARTICIPANT_REMOVED, payload: initialCallerRemovedResult });
-                await expect(adapter.getTelephonyConnector()).resolves.toBe(telephonyAdapter);
-                await expect(telephonyAdapter.getActiveCalls()).resolves.toEqual(dummyActiveTransferringCallResult);
-                const payload = {
-                    initialCallHasEnded : true
-                };
-                assertChannelPortPayload({ eventType: constants.VOICE_EVENT_TYPE.PARTICIPANT_ADDED, payload });
-                assertChannelPortPayloadEventLog({
-                    eventType: constants.VOICE_EVENT_TYPE.PARTICIPANT_ADDED,
-                    payload,
-                    isError: false
-                });
-            });
-
-            it('Should dispatch PARTICIPANT_CONNECTED with removing initial caller and transferred active calls', async () => {
-                telephonyAdapter.getActiveCalls = jest.fn().mockResolvedValue(dummyActiveTransferredallResult);
-                publishEvent({ eventType: Constants.VOICE_EVENT_TYPE.PARTICIPANT_REMOVED, payload: initialCallerRemovedResult });
-                await expect(adapter.getTelephonyConnector()).resolves.toBe(telephonyAdapter);
-                await expect(telephonyAdapter.getActiveCalls()).resolves.toEqual(dummyActiveTransferredallResult);
-                const payload = {
-                    initialCallHasEnded : true
-                };
-                assertChannelPortPayload({ eventType: Constants.VOICE_EVENT_TYPE.PARTICIPANT_CONNECTED, payload });
-                assertChannelPortPayloadEventLog({
-                    eventType: constants.VOICE_EVENT_TYPE.PARTICIPANT_CONNECTED,
-                    payload,
-                    isError: false
-                });
-            });
         });
 
         describe('MESSAGE event', () => {
@@ -3007,6 +3190,16 @@ describe('SCVConnectorBase tests', () => {
                         error: expect.anything()
                     },
                     isError: true
+                });
+            });
+            it('Should dispatch HOLD_TOGGLE on a valid payload from deskphone with isCallMerged true', async () => {
+                holdToggleResult.isCallMerged = true;
+                publishEvent({ eventType: Constants.VOICE_EVENT_TYPE.HOLD_TOGGLE, payload: holdToggleResult });
+                assertChannelPortPayload({ eventType: Constants.VOICE_EVENT_TYPE.HOLD_TOGGLE, payload: holdToggleResult });
+                assertChannelPortPayloadEventLog({
+                    eventType: constants.VOICE_EVENT_TYPE.HOLD_TOGGLE,
+                    payload: holdToggleResult,
+                    isError: false
                 });
             });
         });
