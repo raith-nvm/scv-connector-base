@@ -1027,7 +1027,7 @@ export class PhoneCall {
      * @param {PhoneCallAttributes} [param.callAttributes] - Any additional call attributes
      * @param {string} [param.phoneNumber] - The phone number associated with this call (usually external number)
      * @param {CallInfo} [param.callInfo]
-     * @param {string} [param.reason]
+     * @param {typeof Constants.HANGUP_REASON[keyof typeof Constants.HANGUP_REASON]} [param.reason]
      * @param {boolean} [param.closeCallOnError]
      * @param {string} [param.agentStatus]
      * @param {string} [param.agentARN]
