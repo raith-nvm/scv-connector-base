@@ -1029,7 +1029,7 @@ export class PhoneCall {
      * @param {CallInfo} [param.callInfo]
      * @param {typeof Constants.HANGUP_REASON[keyof typeof Constants.HANGUP_REASON]} [param.reason]
      * @param {boolean} [param.closeCallOnError]
-     * @param {string} [param.agentStatus]
+     * @param {typeof Constants.HANGUP_STATUS[keyof typeof Constants.HANGUP_STATUS]} [param.agentStatus]
      * @param {string} [param.agentARN]
      * @param {Contact} [param.fromContact] - This is optional, and being populated when dialing/consulting a contact or adding a participant
      * @param {Contact} [param.toContact] - This is currently the same as param.contact (just rename)
