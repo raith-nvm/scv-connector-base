@@ -791,7 +791,7 @@ export class CallInfo {
      * @param {boolean} [param.showAddBlindTransferButton]
      * @param {boolean} [param.showMergeButton]
      * @param {boolean} [param.showSwapButton]
-     * @param {("ALWAYS"|"NEVER"|"ALWAYS_EXCEPT_ON_HOLD")} [param.removeParticipantVariant] - The type of remove participant variant when in a transfer call.
+     * @param {typeof Constants.REMOVE_PARTICIPANT_VARIANT[keyof typeof Constants.REMOVE_PARTICIPANT_VARIANT]} [param.removeParticipantVariant] - The type of remove participant variant when in a transfer call.
      * @param {String} [param.additionalFields] - Represents additional standard and custom fields in the voice call record, where each key-value pair value corresponds to a standard or custom field and its values.
      * @param {boolean} [param.isMultiParty]
      * @param {boolean} [param.isHIDCall]
